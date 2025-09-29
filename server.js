@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const todoRoutes = require('./routes/todoRoutes');
+const { connectDB } = require('./config/db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -39,10 +40,18 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Todo API server running on port ${PORT}`);
-  console.log(`📋 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`📝 Todos endpoint: http://localhost:${PORT}/api/todos`);
-});
+// Connect to MongoDB then start server
+connectDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`🚀 Todo API server running on port ${PORT}`);
+      console.log(`📋 Health check: http://localhost:${PORT}/api/health`);
+      console.log(`📝 Todos endpoint: http://localhost:${PORT}/api/todos`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to start server due to DB error:', err.message);
+    process.exit(1);
+  });
 
 module.exports = app;

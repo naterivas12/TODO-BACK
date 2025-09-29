@@ -1,110 +1,81 @@
-const { v4: uuidv4 } = require('uuid');
-const fs = require('fs').promises;
-const path = require('path');
+const mongoose = require('mongoose');
 
-class TodoModel {
-  constructor() {
-    this.dataFile = path.join(__dirname, '../data/todos.json');
-    this.ensureDataFile();
+// Define Mongoose schema
+const TodoSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true, maxlength: 200 },
+    description: { type: String, default: '', maxlength: 1000 },
+    completed: { type: Boolean, default: false },
+    priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' }
+  },
+  { timestamps: true }
+);
+
+// Transform output to match previous JSON structure
+TodoSchema.set('toJSON', {
+  virtuals: true,
+  versionKey: false,
+  transform: (_, ret) => {
+    ret.id = ret._id.toString();
+    delete ret._id;
+    return ret;
   }
+});
 
-  async ensureDataFile() {
-    try {
-      const dataDir = path.dirname(this.dataFile);
-      await fs.mkdir(dataDir, { recursive: true });
-      
-      try {
-        await fs.access(this.dataFile);
-      } catch {
-        await fs.writeFile(this.dataFile, JSON.stringify([]));
-      }
-    } catch (error) {
-      console.error('Error ensuring data file:', error);
-    }
-  }
+const Todo = mongoose.models.Todo || mongoose.model('Todo', TodoSchema);
 
+// Keep the same public API used by routes
+const todoModel = {
   async getAllTodos() {
-    try {
-      const data = await fs.readFile(this.dataFile, 'utf8');
-      return JSON.parse(data);
-    } catch (error) {
-      console.error('Error reading todos:', error);
-      return [];
-    }
-  }
-
-  async saveTodos(todos) {
-    try {
-      await fs.writeFile(this.dataFile, JSON.stringify(todos, null, 2));
-      return true;
-    } catch (error) {
-      console.error('Error saving todos:', error);
-      return false;
-    }
-  }
+    const docs = await Todo.find().sort({ createdAt: -1 }).lean();
+    // manual transform for lean objects
+    return docs.map((d) => ({
+      ...d,
+      id: d._id.toString(),
+      _id: undefined
+    }));
+  },
 
   async createTodo(todoData) {
-    const todos = await this.getAllTodos();
-    const newTodo = {
-      id: uuidv4(),
+    const doc = await Todo.create({
       title: todoData.title,
       description: todoData.description || '',
-      completed: false,
-      priority: todoData.priority || 'medium',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    
-    todos.push(newTodo);
-    const saved = await this.saveTodos(todos);
-    return saved ? newTodo : null;
-  }
+      priority: todoData.priority || 'medium'
+    });
+    return doc.toJSON();
+  },
 
   async getTodoById(id) {
-    const todos = await this.getAllTodos();
-    return todos.find(todo => todo.id === id);
-  }
+    if (!mongoose.Types.ObjectId.isValid(id)) return null;
+    const doc = await Todo.findById(id);
+    return doc ? doc.toJSON() : null;
+  },
 
   async updateTodo(id, updateData) {
-    const todos = await this.getAllTodos();
-    const todoIndex = todos.findIndex(todo => todo.id === id);
-    
-    if (todoIndex === -1) {
-      return null;
-    }
-
-    const updatedTodo = {
-      ...todos[todoIndex],
-      ...updateData,
-      updatedAt: new Date().toISOString()
-    };
-
-    todos[todoIndex] = updatedTodo;
-    const saved = await this.saveTodos(todos);
-    return saved ? updatedTodo : null;
-  }
+    if (!mongoose.Types.ObjectId.isValid(id)) return null;
+    const doc = await Todo.findByIdAndUpdate(
+      id,
+      { ...updateData },
+      { new: true, runValidators: true }
+    );
+    return doc ? doc.toJSON() : null;
+  },
 
   async deleteTodo(id) {
-    const todos = await this.getAllTodos();
-    const todoIndex = todos.findIndex(todo => todo.id === id);
-    
-    if (todoIndex === -1) {
-      return false;
-    }
-
-    todos.splice(todoIndex, 1);
-    return await this.saveTodos(todos);
-  }
+    if (!mongoose.Types.ObjectId.isValid(id)) return false;
+    const res = await Todo.findByIdAndDelete(id);
+    return !!res;
+  },
 
   async getCompletedTodos() {
-    const todos = await this.getAllTodos();
-    return todos.filter(todo => todo.completed);
-  }
+    const docs = await Todo.find({ completed: true }).lean();
+    return docs.map((d) => ({ ...d, id: d._id.toString(), _id: undefined }));
+  },
 
   async getPendingTodos() {
-    const todos = await this.getAllTodos();
-    return todos.filter(todo => !todo.completed);
+    const docs = await Todo.find({ completed: false }).lean();
+    return docs.map((d) => ({ ...d, id: d._id.toString(), _id: undefined }));
   }
-}
+};
 
-module.exports = new TodoModel();
+module.exports = todoModel;
